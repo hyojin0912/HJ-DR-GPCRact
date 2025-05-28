@@ -42,6 +42,7 @@ To set up the environment and run the code, follow these steps:
     ```
 2.  **Install dependencies**:
     We recommend using `conda` to manage your environment for reproducibility.
+    
     **Using `environment.yml` (Recommended)**:
     ```bash
     conda env create -f environment.yml
