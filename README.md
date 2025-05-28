@@ -1,7 +1,9 @@
-# DR (Differential Residue)-based GPCR activity prediction
+# DR-GPCRact: Interpretable prediction of ligand-induced GPCR activity
 
 ## Overview
 This repository contains code and data for the study *"Interpretable prediction of ligand-induced GPCR activity via structure-based differential residue modeling"*, submitted to the *Nature Communications*. The work introduces GPCRactDB, a curated dataset of 202,925 ligand-GPCR interactions, and proposes Differential Residues (DRs)—residues with ligand-induced conformational changes—as interpretable features for predicting GPCR activity.
+
+---
 
 ### Key Findings
 - **GPCR-specific DR patterns**: DRs reflect structural variability across GPCRs; some remain rigid while others exhibit strong dynamic shifts.
@@ -9,6 +11,8 @@ This repository contains code and data for the study *"Interpretable prediction 
 - **Robust interpretable model**: Outperforms sequence-based deep learning models ([DeepREAL](https://academic.oup.com/bioinformatics/article/38/9/2561/6547052), [AiGPro](https://jcheminf.biomedcentral.com/articles/10.1186/s13321-024-00945-7)) under scaffold-based splits.
 - **Generalizability**: Applicable to data-scarce GPCRs using EGNN-predicted DRs (AUROC > 0.8).
 - **Experimental relevance**: DRs align with biologically validated residues in HCAR2, MLNR, and HTR2B.
+
+---
 
 ## Repository Structure
 - **`data/`**: Contains GPCR-related data.
@@ -33,6 +37,8 @@ This repository contains code and data for the study *"Interpretable prediction 
     - `split_gpcr_dataset.py`: Splits dataset into train/test sets.
 - **`outputs/`**: Results and figures (to be populated post-execution).
 
+---
+
 ## Installation
 To set up the environment and run the code, follow these steps:
 1.  **Clone the repository**:
@@ -48,6 +54,48 @@ To set up the environment and run the code, follow these steps:
     conda env create -f environment.yml
     conda activate HJ-DR-GPCRact
     ```
+    **Using `pip`**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+    
+---
+
+## Usage
+
+This section outlines the general workflow for reproducing the results presented in our study.
+
+### 1. Data Preparation
+First, prepare the dataset splits:
+```bash
+python scripts/data_preparation/split_gpcr_dataset.py
+```
+### 2. Modeling
+Proceed with structure analysis, DR extraction, and activity prediction:
+- Structure Analysis:
+```bash
+python scripts/modeling/parse_gpcr_structures.py
+```
+- DR Extraction:
+```bash
+python scripts/modeling/extract_dr.py
+```
+- GPCR Activity Prediction (DR-based models):
+```bash
+python scripts/modeling/predict_gpcr_activity.py
+```
+- DR Prediction with EGNN (for generalizability):
+```bash
+python scripts/modeling/DR_prediction/predict_drs_with_egnn.py
+```
+### 3. Feature Analysis
+To analyze feature importance using SHAP:
+```bash
+python scripts/feature_analysis/analyze_feature_importance_shap.py
+```
+All generated output files, including models and results, will be saved in the `outputs/` directory.
+
+---
 
 ## Figures
 This section showcases key figures generated from our analysis, illustrating the biological relevance of Differential Residues.
