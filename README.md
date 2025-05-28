@@ -1,4 +1,4 @@
-# HJ-DR-GPCRact
+# DR (Differential Residue)-based GPCR activity prediction
 
 ## Overview
 This repository contains code and data for the study *"Interpretable prediction of ligand-induced GPCR activity via structure-based differential residue modeling"*, submitted to the *Nature Communications*. The work introduces GPCRactDB, a curated dataset of 202,925 ligand-GPCR interactions, and proposes Differential Residues (DRs)—residues with ligand-induced conformational changes—as interpretable features for predicting GPCR activity.
@@ -6,7 +6,7 @@ This repository contains code and data for the study *"Interpretable prediction 
 ### Key Findings
 - **GPCR-specific DR patterns**: DRs reflect structural variability across GPCRs; some remain rigid while others exhibit strong dynamic shifts.
 - **High DR consistency**: DRs are conserved across ligands for the same GPCR (consistency score > 0.8).
-- **Robust interpretable model**: Outperforms sequence-based deep learning models ([DeepREAL](https://academic.oup.com/bioinformatics/article/38/9/2561/6547052), [AiGPRo](https://jcheminf.biomedcentral.com/articles/10.1186/s13321-024-00945-7)) under scaffold-based splits.
+- **Robust interpretable model**: Outperforms sequence-based deep learning models ([DeepREAL](https://academic.oup.com/bioinformatics/article/38/9/2561/6547052), [AiGPro](https://jcheminf.biomedcentral.com/articles/10.1186/s13321-024-00945-7)) under scaffold-based splits.
 - **Generalizability**: Applicable to data-scarce GPCRs using EGNN-predicted DRs (AUROC > 0.8).
 - **Experimental relevance**: DRs align with biologically validated residues in HCAR2, MLNR, and HTR2B.
 
@@ -56,3 +56,7 @@ Figure 2: HTR2B (Methylergonovine-bound): Highlights DRs (Asp135, Phe340, Phe341
 ![image](https://github.com/user-attachments/assets/42ab74a1-69a7-49ec-8747-967bdb5e664e)
 
 ## Contact
+For any inquiries regarding this work, please contact:
+- Hyojin Son (hyojin0912@kaist.ac.kr)
+- Prof. Gwan-Su Yi (gwansuyi@kaist.ac.kr)
+
