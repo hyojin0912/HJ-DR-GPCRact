@@ -91,11 +91,14 @@ All generated output files, including models and results, will be saved in the `
 
 
 ## Figures
-This section showcases key figures generated from our analysis, illustrating the biological relevance of Differential Residues.
+This section showcases key figures generated from our analysis, illustrating the biological relevance of Differential Residues and our overall workflow.
 
-Figure 1: MLNR (Erythromycin-bound): Shows DRs (Phe173, Leu341, Phe314) in MLNR.
-Figure 2: HTR2B (Methylergonovine-bound): Highlights DRs (Asp135, Phe340, Phe341) in HTR2B.
-![image](https://github.com/user-attachments/assets/42ab74a1-69a7-49ec-8747-967bdb5e664e)
+* **Figure 1: Overall Workflow and Differential Residue Visualization**
+    * **(a) Schematic workflow for predicting Differential Residues (DRs) and mechanism of action (MoA) in GPCRs with unknown MoA annotations.** This panel outlines the data sources, EGNN-based DR prediction process, DR-guided MoA prediction, and structural alignment for validation.
+    * **(b) MLNR (Erythromycin-bound) with Differential Residues.** This structural overlay highlights DRs (Phe173, Leu341, Phe314) in MLNR upon erythromycin binding, showing conformational changes between the Holo (8IBU) and Apo (8IBV) states.
+    * **(c) HTR2B (Methylergonovine-bound) with Differential Residues.** This structural overlay emphasizes DRs (Asp135, Phe340, Phe341) in HTR2B upon methylergonovine binding, illustrating conformational changes between the Holo (6DRY) and Apo (AF2) states.
+![Figure6](https://github.com/user-attachments/assets/f68fd38f-22e6-49dc-a0e7-61a617889b3a)
+
 
 ## Contact
 For any inquiries regarding this work, please contact:
