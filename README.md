@@ -34,12 +34,25 @@ This repository contains code and data for the study *"Interpretable prediction 
 - **`outputs/`**: Results and figures (to be populated post-execution).
 
 ## Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/hyojin0912/HJ-DR-GPCRact.git
+To set up the environment and run the code, follow these steps:
+1.  **Clone the repository**:
+    ```bash
+    git clone [https://github.com/hyojin0912/HJ-DR-GPCRact.git](https://github.com/hyojin0912/HJ-DR-GPCRact.git)
+    cd HJ-DR-GPCRact
+    ```
+2.  **Install dependencies**:
+    We recommend using `conda` to manage your environment for reproducibility.
+    **Using `environment.yml` (Recommended)**:
+    ```bash
+    conda env create -f environment.yml
+    conda activate HJ-DR-GPCRact
+    ```
 
-2. Install dependencies:
-3. conda env create -f environment.yml
-conda activate HJ-DR-GPCRact
-4. 
-   
+## Figures
+This section showcases key figures generated from our analysis, illustrating the biological relevance of Differential Residues.
+
+Figure 1: MLNR (Erythromycin-bound): Shows DRs (Phe173, Leu341, Phe314) in MLNR.
+Figure 2: HTR2B (Methylergonovine-bound): Highlights DRs (Asp135, Phe340, Phe341) in HTR2B.
+![image](https://github.com/user-attachments/assets/42ab74a1-69a7-49ec-8747-967bdb5e664e)
+
+## Contact
