@@ -60,3 +60,7 @@ For any inquiries regarding this work, please contact:
 - Hyojin Son (hyojin0912@kaist.ac.kr)
 - Prof. Gwan-Su Yi (gwansuyi@kaist.ac.kr)
 
+## License
+The code in this repository is licensed under the MIT License. See the [LICENSE](./LICENSE) file for more details.
+
+The data in the `data` folder is licensed under the CC BY 4.0 International license. See the [LICENSE](./LICENSE) file for more details.
