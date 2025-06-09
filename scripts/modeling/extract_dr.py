@@ -40,12 +40,12 @@ DR_SETS_CSV = os.path.join(OUTPUT_FINAL_DIR, f"GPCR_DR_sets_thr_{DISP_THRESHOLD_
 def extract_dr_ago():
     """Extract DR-Ago by comparing Apo (or AF2) vs. Agonist-bound structures."""
     # Load input data
-    rep_apo_df = pd.read_csv("../Output/Final/Representative_Apo_Structures.csv", dtype={'PDB_ID': str})
+    rep_apo_df = pd.read_csv("../data/Representative_Apo_Structures.csv", dtype={'PDB_ID': str})
     rep_apo_df = rep_apo_df[rep_apo_df.Binding_Coverage.astype(float) >= 50]
     rep_map = dict(zip(rep_apo_df.UniProt_ID, rep_apo_df.PDB_ID))
-    cls_df = pd.read_csv("../Output/Final/GPCR_PDB_classification.csv")[['UniProt_ID', 'Ago_PDB']]
-    lig_info = pd.read_csv("../Input/Binding_site/PDB_ago_ant_chain_info_v2.csv", dtype={'PDB_ID': str})
-    rep_chain = pd.read_csv("../Output/Binding_Residue/Rep_GPCR_chain.csv", dtype={'PDB_ID': str})
+    cls_df = pd.read_csv("../data/GPCR_PDB_classification.csv")[['UniProt_ID', 'Ago_PDB']]
+    lig_info = pd.read_csv("../data/PDB_ago_ant_chain_info_v2.csv", dtype={'PDB_ID': str})
+    rep_chain = pd.read_csv("../data/Rep_GPCR_chain.csv", dtype={'PDB_ID': str})
 
     dr_dict, summary = {}, []
     for _, row in cls_df[cls_df.Ago_PDB > 0].iterrows():
@@ -112,9 +112,9 @@ def extract_dr_ant():
     rep_apo_df = pd.read_csv("../Output/Final/Representative_Apo_Structures.csv", dtype={'PDB_ID': str})
     rep_apo_df = rep_apo_df[rep_apo_df.Binding_Coverage.astype(float) >= 50]
     rep_map = dict(zip(rep_apo_df.UniProt_ID, rep_apo_df.PDB_ID))
-    cls_df = pd.read_csv("../Output/Final/GPCR_PDB_classification.csv")[['UniProt_ID', 'Ant_PDB']]
-    lig_info = pd.read_csv("../Input/Binding_site/PDB_ago_ant_chain_info_v2.csv", dtype={'PDB_ID': str})
-    rep_chain = pd.read_csv("../Output/Binding_Residue/Rep_GPCR_chain.csv", dtype={'PDB_ID': str})
+    cls_df = pd.read_csv("../data/GPCR_PDB_classification.csv")[['UniProt_ID', 'Ant_PDB']]
+    lig_info = pd.read_csv("../data/PDB_ago_ant_chain_info_v2.csv", dtype={'PDB_ID': str})
+    rep_chain = pd.read_csv("../data/Rep_GPCR_chain.csv", dtype={'PDB_ID': str})
 
     dr_dict, summary = {}, []
     for _, row in cls_df[cls_df.Ant_PDB > 0].iterrows():
@@ -178,9 +178,9 @@ def extract_dr_ant():
 
 def extract_dr_state():
     """Extract DR-State by comparing Agonist-bound vs. Antagonist-bound structures."""
-    cls_df = pd.read_csv("../Output/Final/GPCR_PDB_classification.csv")[['UniProt_ID', 'Ago_PDB', 'Ant_PDB']]
-    lig_info = pd.read_csv("../Input/Binding_site/PDB_ago_ant_chain_info_v2.csv", dtype={'PDB_ID': str})
-    rep_chain = pd.read_csv("../Output/Binding_Residue/Rep_GPCR_chain.csv", dtype={'PDB_ID': str})
+    cls_df = pd.read_csv("../data/GPCR_PDB_classification.csv")[['UniProt_ID', 'Ago_PDB', 'Ant_PDB']]
+    lig_info = pd.read_csv("../data/PDB_ago_ant_chain_info_v2.csv", dtype={'PDB_ID': str})
+    rep_chain = pd.read_csv("../data/Rep_GPCR_chain.csv", dtype={'PDB_ID': str})
 
     dr_dict, summary = {}, []
     for _, row in cls_df[(cls_df.Ago_PDB > 0) & (cls_df.Ant_PDB > 0)].iterrows():
@@ -310,11 +310,11 @@ def debug_dr_for(uid, dr_type="ago"):
     if dr_type not in ["ago", "ant", "state"]:
         raise ValueError("dr_type must be 'ago', 'ant', or 'state'")
 
-    rep_apo_df = pd.read_csv("../Output/Final/Representative_Apo_Structures.csv", dtype={'PDB_ID': str})
+    rep_apo_df = pd.read_csv("../data/Representative_Apo_Structures.csv", dtype={'PDB_ID': str})
     rep_apo_df = rep_apo_df[rep_apo_df.Binding_Coverage.astype(float) >= 50]
     rep_map = dict(zip(rep_apo_df.UniProt_ID, rep_apo_df.PDB_ID))
-    rep_chain = pd.read_csv("../Output/Binding_Residue/Rep_GPCR_chain.csv", dtype={'PDB_ID': str})
-    lig_info = pd.read_csv("../Input/Binding_site/PDB_ago_ant_chain_info_v2.csv", dtype={'PDB_ID': str})
+    rep_chain = pd.read_csv("../data/Rep_GPCR_chain.csv", dtype={'PDB_ID': str})
+    lig_info = pd.read_csv("../data/PDB_ago_ant_chain_info_v2.csv", dtype={'PDB_ID': str})
 
     if dr_type in ["ago", "ant"]:
         apo_source = rep_map.get(uid)
