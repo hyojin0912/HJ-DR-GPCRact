@@ -17,6 +17,8 @@ This script is a prerequisite for downstream structural modeling and analysis.
 """
 
 import os
+import ast
+import argparse
 import re
 import pandas as pd
 from Bio.PDB import MMCIFParser, Polypeptide, is_aa
@@ -186,31 +188,59 @@ def process_gpcr_pdb_chains(gpcr_info_csv: str, output_dir: str, cif_cache_dir: 
     return output_path
 
 
-def select_apo_structures(gpcr_pdb_info_csv: str, binding_sites_csv: str, rep_chain_csv: str, output_dir: str, cif_cache_dir: str) -> str:
+def select_apo_structures(
+    gpcr_info_csv: str,
+    pdb_classification_csv: str,
+    binding_residues_csv: str,
+    rep_chain_csv: str,
+    output_dir: str,
+    cif_cache_dir: str
+) -> str:
     """
     Selects the best representative "Apo" structure for each GPCR.
+    This version first merges classification data before filtering.
 
     Args:
-        gpcr_pdb_info_csv (str): Path to CSV with UniProt ID, PDB ID, and 'Classification'.
-        binding_sites_csv (str): Path to CSV with binding site residues for each UniProt ID.
+        gpcr_info_csv (str): Path to master CSV with UniProt IDs and their associated PDB IDs.
+        pdb_classification_csv (str): Path to CSV that classifies each PDB_ID. Must contain
+                                      'PDB_ID' and 'Classification' columns.
+        binding_residues_csv (str): Path to CSV with binding site residues for each UniProt ID.
         rep_chain_csv (str): Path to CSV mapping each PDB to its representative chain.
         output_dir (str): Directory to save the output CSV file.
         cif_cache_dir (str): Directory to cache downloaded mmCIF files.
-
-    Returns:
-        str: The path to the generated output file.
     """
-    gpcr_pdb_df = pd.read_csv(gpcr_pdb_info_csv)
-    gpcr_bs_df = pd.read_csv(binding_sites_csv)
+    # --- Load Data ---
+    gpcr_info_df = pd.read_csv(gpcr_info_csv)
+    pdb_classification_df = pd.read_csv(pdb_classification_csv)
+    binding_residues_df = pd.read_csv(binding_residues_csv)
     rep_chain_df = pd.read_csv(rep_chain_csv)
     parser = MMCIFParser(QUIET=True)
 
-    apo_df = gpcr_pdb_df[gpcr_pdb_df["Classification"].str.lower() == "apo"].copy()
-    results = []
+    # --- Pre-processing: Expand and Merge DataFrames ---
+    # 1. Expand the semi-colon separated 'PDB' column into individual rows.
+    expanded_pdbs = gpcr_info_df.drop('PDB', axis=1).join(
+        gpcr_info_df['PDB'].str.split(';', expand=True)
+        .stack().reset_index(level=1, drop=True).rename('PDB_ID')
+    )
+    expanded_pdbs = expanded_pdbs[expanded_pdbs['PDB_ID'] != ''].reset_index(drop=True)
 
+    # 2. Merge with classification data to label each PDB.
+    # Assumes pdb_classification_df has 'PDB_ID' and 'Classification' columns.
+    merged_df = pd.merge(
+        expanded_pdbs,
+        pdb_classification_df[['PDB_ID', 'Classification']],
+        on='PDB_ID',
+        how='left'
+    )
+
+    # 3. Filter for Apo structures.
+    apo_df = merged_df[merged_df["Classification"].str.lower() == "apo"].copy()
+
+    # --- Main Logic ---
+    results = []
     print("[INFO] Selecting best Apo structure for each GPCR...")
     for uniprot_id, group in tqdm(apo_df.groupby("Entry"), total=apo_df['Entry'].nunique()):
-        binding_row = gpcr_bs_df[gpcr_bs_df["UniProt_ID"] == uniprot_id]
+        binding_row = binding_residues_df[binding_residues_df["UniProt_ID"] == uniprot_id]
         if binding_row.empty:
             continue
         binding_residues_list = ast.literal_eval(binding_row.iloc[0]["Binding_Residues"])
@@ -260,11 +290,12 @@ def select_apo_structures(gpcr_pdb_info_csv: str, binding_sites_csv: str, rep_ch
 
         if candidates:
             best_candidate = _find_best_candidate(candidates)
-            results.append({
-                "UniProt_ID": best_candidate["UniProt_ID"],
-                "PDB_ID": best_candidate["PDB_ID"],
-                "Resolution": best_candidate["Resolution"]
-            })
+            if best_candidate:
+                results.append({
+                    "UniProt_ID": best_candidate["UniProt_ID"],
+                    "PDB_ID": best_candidate["PDB_ID"],
+                    "Resolution": best_candidate["Resolution"]
+                })
 
     df = pd.DataFrame(results, columns=["UniProt_ID", "PDB_ID", "Resolution"])
     output_path = os.path.join(output_dir, "Representative_Apo_Structures.csv")
@@ -283,32 +314,27 @@ def main():
     )
 
     parser.add_argument(
-        "--gpcr_info_csv",
-        type=str,
-        default="data/Human_GPCR_PDB_Info.csv",
-        help="Path to the master CSV file with UniProt IDs and PDB IDs.\n(Default: data/Human_GPCR_PDB_Info.csv)"
+        "--gpcr_info_csv", type=str, default="data/Human_GPCR_PDB_Info.csv",
+        help="Path to the master CSV with UniProt IDs and PDB IDs.\n(Default: data/Human_GPCR_PDB_Info.csv)"
     )
     parser.add_argument(
-        "--binding_site_csv",
-        type=str,
-        default="data/GPCR_PDB_classification.csv",
-        help="Path to the CSV file containing binding site residue information.\n(Default: data/GPCR_PDB_classification.csv)"
+        "--pdb_classification_csv", type=str, default="data/PDB_ago_ant_chain_info.v2.csv",
+        help="Path to the CSV file classifying each PDB ID.\n(Requires 'PDB_ID' and 'Classification' columns).\n(Default: data/PDB_ago_ant_chain_info.v2.csv)"
     )
     parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="outputs/structural_analysis",
+        "--binding_residues_csv", type=str, default="data/GPCR_Binding_Residues.UniProt.csv",
+        help="Path to the CSV file with binding site residues for each UniProt ID.\n(Default: data/GPCR_Binding_Residues.UniProt.csv)"
+    )
+    parser.add_argument(
+        "--output_dir", type=str, default="outputs/structural_analysis",
         help="Directory to save the output files.\n(Default: outputs/structural_analysis)"
     )
     parser.add_argument(
-        "--cif_cache_dir",
-        type=str,
-        default="cif_cache",
+        "--cif_cache_dir", type=str, default="cif_cache",
         help="Directory to cache downloaded mmCIF files.\n(Default: cif_cache)"
     )
     parser.add_argument(
-        "--skip_chain_processing",
-        action="store_true",
+        "--skip_chain_processing", action="store_true",
         help="Skip the 'process_gpcr_pdb_chains' step if its output already exists."
     )
 
@@ -324,6 +350,7 @@ def main():
     if args.skip_chain_processing and os.path.exists(rep_chain_path):
         print(f"[INFO] Skipping chain processing. Using existing file: {rep_chain_path}")
     else:
+        print("[INFO] === STEP 1: Processing GPCR PDB chains... ===")
         rep_chain_path = process_gpcr_pdb_chains(
             gpcr_info_csv=args.gpcr_info_csv,
             output_dir=args.output_dir,
@@ -331,12 +358,14 @@ def main():
         )
 
     if not rep_chain_path or not os.path.exists(rep_chain_path):
-         print("[ERROR] Representative chain file was not found or generated. Cannot proceed. Exiting.")
-         return
+        print("[ERROR] Representative chain file was not found or generated. Cannot proceed. Exiting.")
+        return
 
+    print("\n[INFO] === STEP 2: Selecting representative Apo structures... ===")
     select_apo_structures(
-        gpcr_pdb_info_csv=args.gpcr_info_csv,
-        binding_sites_csv=args.binding_site_csv,
+        gpcr_info_csv=args.gpcr_info_csv,
+        pdb_classification_csv=args.pdb_classification_csv,
+        binding_residues_csv=args.binding_residues_csv,
         rep_chain_csv=rep_chain_path,
         output_dir=args.output_dir,
         cif_cache_dir=args.cif_cache_dir
