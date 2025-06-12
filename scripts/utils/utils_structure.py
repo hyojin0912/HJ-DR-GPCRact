@@ -27,12 +27,41 @@ from Bio.SubsMat import MatrixInfo as matlist
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from parse_gpcr_structures import *
 
-# It's recommended to replace 'import *' with explicit imports
-# for better code clarity and to avoid namespace pollution.
-# For example: from parse_gpcr_structures import fetch_uniprot_sequence, download_mmcif
-from parse_gpcr_structures import *
-
 # --- Helper Functions ---
+def extract_resolution_from_cif(cif_path: str) -> float | None:
+    """
+    Extracts the resolution from an mmCIF file.
+
+    It parses the file to a dictionary and searches for common resolution keys.
+
+    Args:
+        cif_path (str): The file path to the .cif file.
+
+    Returns:
+        float | None: The resolution as a float, or None if not found.
+    """
+    try:
+        cif_dict = MMCIF2Dict(cif_path)
+        keys_to_check = [
+            "_refine.ls_d_res_high",
+            "_reflns.d_resolution_high",
+            "_em_3d_reconstruction.resolution"
+        ]
+        for key in keys_to_check:
+            if key in cif_dict:
+                value = cif_dict[key]
+                # The value can be a list, take the first element.
+                if isinstance(value, list):
+                    value = value[0]
+                # Attempt to convert to float
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    continue
+        return None
+    except Exception as e:
+        print(f"[WARN] Could not parse or extract resolution from {os.path.basename(cif_path)}: {e}")
+        return None
 
 def _find_best_candidate(candidates: list) -> dict:
     """
