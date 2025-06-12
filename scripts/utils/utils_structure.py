@@ -198,12 +198,12 @@ def select_apo_structures(
 ) -> str:
     """
     Selects the best representative "Apo" structure for each GPCR.
-    This version first merges classification data before filtering.
+    This version identifies Apo PDBs from the 'Apo_PDB' column in the classification file.
 
     Args:
         gpcr_info_csv (str): Path to master CSV with UniProt IDs and their associated PDB IDs.
-        pdb_classification_csv (str): Path to CSV that classifies each PDB_ID. Must contain
-                                      'PDB_ID' and 'Classification' columns.
+        pdb_classification_csv (str): Path to CSV containing lists of PDBs for each state
+                                      (e.g., 'Apo_PDB', 'Ago_PDB').
         binding_residues_csv (str): Path to CSV with binding site residues for each UniProt ID.
         rep_chain_csv (str): Path to CSV mapping each PDB to its representative chain.
         output_dir (str): Directory to save the output CSV file.
@@ -216,25 +216,24 @@ def select_apo_structures(
     rep_chain_df = pd.read_csv(rep_chain_csv)
     parser = MMCIFParser(QUIET=True)
 
-    # --- Pre-processing: Expand and Merge DataFrames ---
-    # 1. Expand the semi-colon separated 'PDB' column into individual rows.
-    expanded_pdbs = gpcr_info_df.drop('PDB', axis=1).join(
+    # --- Pre-processing: Create a set of all Apo PDB IDs for fast lookup ---
+    apo_pdb_set = set()
+    # Ensure the column exists and handle potential NaN values
+    if 'Apo_PDB' in pdb_classification_df.columns:
+        for pdb_list_str in pdb_classification_df['Apo_PDB'].dropna():
+            if isinstance(pdb_list_str, str):
+                 for pdb_id in pdb_list_str.split(';'):
+                    if pdb_id.strip():
+                        apo_pdb_set.add(pdb_id.strip())
+
+    # --- Filter PDBs that are in the Apo set ---
+    all_pdbs = gpcr_info_df.drop('PDB', axis=1).join(
         gpcr_info_df['PDB'].str.split(';', expand=True)
         .stack().reset_index(level=1, drop=True).rename('PDB_ID')
     )
-    expanded_pdbs = expanded_pdbs[expanded_pdbs['PDB_ID'] != ''].reset_index(drop=True)
-
-    # 2. Merge with classification data to label each PDB.
-    # Assumes pdb_classification_df has 'PDB_ID' and 'Classification' columns.
-    merged_df = pd.merge(
-        expanded_pdbs,
-        pdb_classification_df[['PDB_ID', 'Classification']],
-        on='PDB_ID',
-        how='left'
-    )
-
-    # 3. Filter for Apo structures.
-    apo_df = merged_df[merged_df["Classification"].str.lower() == "apo"].copy()
+    all_pdbs = all_pdbs[all_pdbs['PDB_ID'] != ''].reset_index(drop=True)
+    
+    apo_df = all_pdbs[all_pdbs['PDB_ID'].isin(apo_pdb_set)].copy()
 
     # --- Main Logic ---
     results = []
@@ -256,30 +255,23 @@ def select_apo_structures(
             cif_path = download_mmcif(pdb_id, cif_cache_dir)
             if not cif_path:
                 continue
-
             try:
+                # ... (Rest of the processing logic is the same) ...
                 structure = parser.get_structure(pdb_id.lower(), cif_path)
                 model = next(structure.get_models())
-                if optimal_chain_id not in model:
-                    continue
-                
+                if optimal_chain_id not in model: continue
                 chain = model[optimal_chain_id]
                 pdb_res_list = [res for res in chain if is_aa(res, standard=True)]
                 pdb_seq = Polypeptide.Polypeptide(chain).get_sequence()
-                
                 uni_seq = fetch_uniprot_sequence(uniprot_id)
                 if not uni_seq: continue
-
                 aln = local_align_smith_waterman(str(pdb_seq), uni_seq)
                 res_map = map_pdb_res_to_uniprot(pdb_res_list, aln["aligned_pdb_seq"], aln["aligned_uni_seq"])
-                
                 mapped_uniprot_set = set(res_map.values())
                 overlap = set(binding_residues_list).intersection(mapped_uniprot_set)
                 coverage = len(overlap) / len(binding_residues_list) if binding_residues_list else 0
-                
                 resolution = extract_resolution_from_cif(cif_path)
                 res_value = float(resolution) if resolution != "NA" else None
-
                 candidates.append({
                     "UniProt_ID": uniprot_id, "PDB_ID": pdb_id, "Binding_include": int(coverage == 1.0),
                     "Binding_coverage": coverage, "Resolution": resolution, "Res_value": res_value
@@ -287,7 +279,7 @@ def select_apo_structures(
             except Exception as e:
                 print(f"[ERROR] Failed to process Apo structure {pdb_id} for {uniprot_id}: {e}")
                 continue
-
+                
         if candidates:
             best_candidate = _find_best_candidate(candidates)
             if best_candidate:
@@ -315,11 +307,11 @@ def main():
 
     parser.add_argument(
         "--gpcr_info_csv", type=str, default="data/Human_GPCR_PDB_Info.csv",
-        help="Path to the master CSV with UniProt IDs and PDB IDs.\n(Default: data/Human_GPCR_PDB_Info.csv)"
+        help="Path to the master CSV with UniProt IDs and all associated PDB IDs.\n(Default: data/Human_GPCR_PDB_Info.csv)"
     )
     parser.add_argument(
-        "--pdb_classification_csv", type=str, default="data/PDB_ago_ant_chain_info.v2.csv",
-        help="Path to the CSV file classifying each PDB ID.\n(Requires 'PDB_ID' and 'Classification' columns).\n(Default: data/PDB_ago_ant_chain_info.v2.csv)"
+        "--pdb_classification_csv", type=str, default="data/GPCR_PDB_classification.csv",
+        help="Path to the CSV file with lists of PDBs for each state.\nThis script uses the 'Apo_PDB' column.\n(Default: data/GPCR_PDB_classification.csv)"
     )
     parser.add_argument(
         "--binding_residues_csv", type=str, default="data/GPCR_Binding_Residues.UniProt.csv",
@@ -340,7 +332,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Create necessary directories
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(args.cif_cache_dir, exist_ok=True)
 
