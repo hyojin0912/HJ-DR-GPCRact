@@ -114,6 +114,31 @@ def parse_structure(pdb_id, file_path, parser_type="pdb"):
         print(f"[ERROR] parse_structure({pdb_id}): {e}")
         return None
 
+def extract_resolution_from_cif(cif_path: str) -> float | None:
+    """Extracts the resolution from an mmCIF file."""
+    try:
+        cif_dict = MMCIF2Dict(cif_path)
+        keys_to_check = [
+            "_refine.ls_d_res_high",
+            "_reflns.d_resolution_high",
+            "_em_3d_reconstruction.resolution"
+        ]
+        for key in keys_to_check:
+            if key in cif_dict:
+                value = cif_dict[key]
+                # The value can be a list, take the first element.
+                if isinstance(value, list):
+                    value = value[0]
+                # Attempt to convert to float
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    continue
+        return None
+    except Exception as e:
+        print(f"[WARN] Could not parse or extract resolution from {os.path.basename(cif_path)}: {e}")
+        return None
+
 def fetch_uniprot_sequence(uniprot_id):
     """Fetch UniProt sequence as a string."""
     url = f"https://www.uniprot.org/uniprot/{uniprot_id}.fasta"
