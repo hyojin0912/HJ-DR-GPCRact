@@ -24,24 +24,28 @@ from tensorflow.keras.models import load_model
 tf.random.set_seed(42)
 np.random.seed(42)
 
-# Global settings
-MODEL_PATH = "../Output/Final/AF2/model"
-DR_COORD_PATH = f"../Data/Feature/AF2/Final_GPCR_all_DR_labels_2.0_2.0_0.5.pt"
-OUTPUT_DIR = "../Output/Final/AF2/predictions"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# --- Global Settings ---
+# NOTE: Update these paths to match your repository structure
+MODEL_PATH = "../Output/Final/AF2/model"  # Path to the saved Keras model directory or .h5 file
 
-# DR thresholds
+# DR thresholds (ensure these match the training configuration)
 DISP_THRESHOLD_AGO = 2.0
 DISP_THRESHOLD_ANT = 2.0
 DISP_THRESHOLD_STATE = 0.5
 
+DR_COORD_PATH = f"../Data/Feature/AF2/Final_GPCR_all_DR_labels_{DISP_THRESHOLD_AGO}_{DISP_THRESHOLD_ANT}_{DISP_THRESHOLD_STATE}.pt"
+DR_SETS_PATH = f"../Output/Final/AF2/GPCR_DR_sets_thr_{DISP_THRESHOLD_AGO}_{DISP_THRESHOLD_ANT}_{DISP_THRESHOLD_STATE}.csv"
+OUTPUT_DIR = "../Output/Final/AF2/predictions"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
 # Load ESM-1b model once
+print("[INFO] Loading ESM-1b model...")
 esm_model, alphabet = esm.pretrained.esm1b_t33_650M_UR50S()
 batch_converter = alphabet.get_batch_converter()
 esm_model.eval()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 esm_model = esm_model.to(device)
-
+print(f"[INFO] ESM-1b model loaded to {device}.")
 
 @torch.no_grad()
 def esm_vec(seq, idx_list):
@@ -70,37 +74,34 @@ def generate_ecfp4(smiles):
     try:
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            return np.zeros(1024, np.float32)
+            return np.zeros(1024, dtype=np.float32)
         fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=1024)
         return np.array(fp, dtype=np.float32)
     except Exception as e:
         print(f"[ERR] generate_ecfp4: {e}")
-        return np.zeros(1024, np.float32)
+        return np.zeros(1024, dtype=np.float32)
 
-def generate_dr1286(uniprot_id, dr_coord_dict):
+def generate_dr1286(uniprot_id, dr_sets_df, dr_coord_dict):
     """Generate 1286-dim DR feature vector (1280 ESM-1b + 6 geometric)."""
-    # Load DR sets
-    dr_sets = pd.read_csv(f"../Output/Final/AF2/GPCR_DR_sets_thr_{DISP_THRESHOLD_AGO}_{DISP_THRESHOLD_ANT}_{DISP_THRESHOLD_STATE}.csv")
-    dr_row = dr_sets[dr_sets['UniProt_ID'] == uniprot_id]
+    dr_row = dr_sets_df[dr_sets_df['UniProt_ID'] == uniprot_id]
     if dr_row.empty:
         print(f"[WARN] No DR data for {uniprot_id}")
-        return np.zeros(1286, np.float32)
+        return np.zeros(1286, dtype=np.float32)
 
     # Parse DR lists
-    import ast
     dr_ago = set(ast.literal_eval(dr_row['DR-Ago'].iloc[0]))
     dr_ant = set(ast.literal_eval(dr_row['DR-Ant'].iloc[0]))
     dr_state = set(ast.literal_eval(dr_row['DR-State'].iloc[0]))
     dr_all = sorted(dr_ago | dr_ant | dr_state)
     if not dr_all:
         print(f"[WARN] Empty DR set for {uniprot_id}")
-        return np.zeros(1286, np.float32)
+        return np.zeros(1286, dtype=np.float32)
 
     # Fetch ESM-1b features
     seq = fetch_uniprot_sequence(uniprot_id)
     if not seq:
         print(f"[ERR] No sequence for {uniprot_id}")
-        return np.zeros(1286, np.float32)
+        return np.zeros(1286, dtype=np.float32)
     esm1280 = esm_vec(seq, dr_all)
 
     # Extract coordinates
@@ -124,7 +125,7 @@ def generate_dr1286(uniprot_id, dr_coord_dict):
     dr_vec = np.concatenate([
         esm1280,
         centroid,
-        np.array([mean_dist, std_dist, len(dr_all)], np.float32)
+        np.array([mean_dist, std_dist, len(dr_all)], dtype=np.float32)
     ])
     return dr_vec.astype(np.float32)
 
@@ -132,13 +133,21 @@ def predict_activity(input_df, model_path=MODEL_PATH, debug=False):
     """Predict GPCR activity for ligand-GPCR pairs."""
     # Load model
     try:
+        print(f"[INFO] Loading pretrained model from {model_path}...")
         model = load_model(model_path)
+        model.summary()
     except Exception as e:
         print(f"[ERR] Failed to load model: {e}")
         return None
 
-    # Load DR coordinates
-    dr_coord_dict = torch.load(DR_COORD_PATH, map_location="cpu")
+    # Load prerequisite data files for feature generation
+    print("[INFO] Loading feature generation data...")
+    try:
+        dr_coord_dict = torch.load(DR_COORD_PATH, map_location="cpu")
+        dr_sets_df = pd.read_csv(DR_SETS_PATH)
+    except FileNotFoundError as e:
+        print(f"[ERR] Prerequisite data file not found: {e}")
+        return None
 
     # Generate features
     results = []
@@ -207,5 +216,5 @@ if __name__ == "__main__":
         debug_prediction(
             uniprot_id="P08913",
             ikey="CHEMBL123456",
-            smiles="CC1=CC=C(C=C1)NC(=O)C2=CC=CC=C2"
+            smiles="C1CCC(/N=C(/NC2CCCCC2)N2CCOCC2)CC1"
         )
