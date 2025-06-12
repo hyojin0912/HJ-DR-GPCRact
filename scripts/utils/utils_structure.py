@@ -1,3 +1,21 @@
+"""
+utils_structure.py
+
+A utility script for processing and analyzing GPCR (G protein-coupled receptor)
+structures from PDB files. This script is designed to be run as a command-line
+tool to perform a two-step pipeline:
+
+1.  **Identify Representative Chains**: For a given list of GPCRs and their
+    associated PDB entries, this script finds the most suitable protein chain
+    by aligning it with the UniProt sequence. The results are saved to a CSV file.
+
+2.  **Select Representative Apo Structures**: Using the chain information from
+    step 1, this script identifies the best "Apo" (ligand-free) structure for
+    each GPCR based on binding site coverage and experimental resolution.
+
+This script is a prerequisite for downstream structural modeling and analysis.
+"""
+
 import os
 import re
 import pandas as pd
@@ -7,182 +25,325 @@ from Bio.SubsMat import MatrixInfo as matlist
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from parse_gpcr_structures import *
 
-def select_apo_structures(gpcr_pdb_csv, gpcr_bs_csv, rep_chain_csv):
-    """Generate Representative_Apo_Structures_v2.csv."""
-    gpcr_pdb_df = pd.read_csv(gpcr_pdb_csv)
-    gpcr_bs_df = pd.read_csv(gpcr_bs_csv)
-    rep_chain_df = pd.read_csv(rep_chain_csv)
-    gpcr_pdb_df = gpcr_pdb_df[gpcr_pdb_df["Classification"].str.lower() == "apo"]
-    results = []
-    for uniprot_id, group in gpcr_pdb_df.groupby("Entry"):
-        binding_row = gpcr_bs_df[gpcr_bs_df["UniProt_ID"] == uniprot_id]
-        if binding_row.empty:
-            continue
-        binding_residues_list = binding_row.iloc[0]["Binding_Residues"]
-        binding_residues_list = ast.literal_eval(binding_residues_list) if isinstance(binding_residues_list, str) else binding_residues_list
-        candidates = []
-        for _, row in group.iterrows():
-            pdb_id = row["PDB_ID"].strip()
-            cif_path = download_mmcif(pdb_id)
-            if not cif_path:
-                continue
-            structure = parser.get_structure(pdb_id.lower(), cif_path)
-            if not structure:
-                continue
-            optimal_chain_id = rep_chain_df[(rep_chain_df["UniProt_ID"] == uniprot_id) &
-                                           (rep_chain_df["PDB_ID"] == pdb_id)]["chain_id"].iloc[0]
-            model = next(structure.get_models())
-            if optimal_chain_id not in model.child_dict:
-                continue
-            chain = model[optimal_chain_id]
-            polypep = Polypeptide.Polypeptide(chain)
-            pdb_seq = str(polypep.get_sequence())
-            pdb_res_list = [res for res in chain if is_aa(res, standard=True)]
-            uni_seq = fetch_uniprot_sequence(uniprot_id)
-            if not uni_seq:
-                continue
-            aln = local_align_smith_waterman(pdb_seq, uni_seq)
-            res_map = map_pdb_res_to_uniprot(pdb_res_list, aln["aligned_pdb_seq"], aln["aligned_uni_seq"])
-            mapped_uniprot_set = set(res_map.values())
-            overlap = set(binding_residues_list).intersection(mapped_uniprot_set)
-            binding_coverage = len(overlap) / len(binding_residues_list) if binding_residues_list else 0
-            binding_include = 1 if binding_coverage == 1 else 0
-            resolution = extract_resolution_from_cif(cif_path)
-            res_value = float(resolution) if resolution != "NA" else None
-            candidates.append({
-                "UniProt_ID": uniprot_id, "PDB_ID": pdb_id, "Binding_include": binding_include,
-                "Binding_coverage": binding_coverage, "Resolution": resolution, "Res_value": res_value
-            })
-        if candidates:
-            bind_incl_candidates = [c for c in candidates if c["Binding_include"] == 1]
-            if bind_incl_candidates:
-                with_resolution = [c for c in bind_incl_candidates if c["Res_value"] is not None]
-                best = min(with_resolution, key=lambda x: x["Res_value"]) if with_resolution else bind_incl_candidates[0]
-            else:
-                coverage_sorted = sorted(candidates, key=lambda x: x["Binding_coverage"], reverse=True)
-                max_cov = coverage_sorted[0]["Binding_coverage"]
-                top_cov = [c for c in coverage_sorted if c["Binding_coverage"] == max_cov]
-                with_resolution = [c for c in top_cov if c["Res_value"] is not None]
-                best = min(with_resolution, key=lambda x: x["Res_value"]) if with_resolution else top_cov[0]
-            results.append({"UniProt_ID": uniprot_id, "PDB_ID": best["PDB_ID"], "Resolution": best["Resolution"]})
-    df = pd.DataFrame(results, columns=["UniProt_ID", "PDB_ID", "Resolution"])
-    df.to_csv(os.path.join(OUTPUT_DIR, "Representative_Apo_Structures_v2.csv"), index=False)
-    return df
+# It's recommended to replace 'import *' with explicit imports
+# for better code clarity and to avoid namespace pollution.
+# For example: from parse_gpcr_structures import fetch_uniprot_sequence, download_mmcif
+from parse_gpcr_structures import *
 
-def find_best_chain_local(structure, seq_uniprot,
-                          cov_chain_thr=0.7, cov_uniprot_thr=0.7, identity_thr=0.7):
+# --- Helper Functions ---
+
+def _find_best_candidate(candidates: list) -> dict:
     """
-    Among all chains in the first model of 'structure', perform local alignment
-    with 'seq_uniprot' and compute coverageChain, coverageUniProt, identity, alignment score.
-    Return (best_chain_id, df_chain_info).
-    
-    - best_chain_id: chain ID that passes thresholds and has highest alignment score.
-      If none pass, return None.
-    - df_chain_info: DataFrame with columns:
-        chain_id, chain_length, score, coverageChain, coverageUniProt, identity, pass_filter
+    Selects the best PDB candidate from a list based on a two-tier criterion.
+    1. Prioritize candidates with full binding site coverage. Among these,
+       select the one with the best (lowest) resolution.
+    2. If none have full coverage, select candidates with the highest partial
+       coverage. Among these, select the one with the best resolution.
+
+    Args:
+        candidates (list): A list of dictionaries, where each dictionary
+                           represents a PDB candidate and its properties.
+
+    Returns:
+        dict: The dictionary of the best candidate found.
+    """
+    # Tier 1: Prefer candidates with full binding site coverage
+    full_coverage_candidates = [c for c in candidates if c["Binding_include"] == 1]
+    if full_coverage_candidates:
+        with_resolution = [c for c in full_coverage_candidates if c["Res_value"] is not None]
+        if with_resolution:
+            return min(with_resolution, key=lambda x: x["Res_value"])
+        return full_coverage_candidates[0]
+
+    # Tier 2: Fallback to highest partial coverage
+    sorted_by_coverage = sorted(candidates, key=lambda x: x["Binding_coverage"], reverse=True)
+    max_coverage = sorted_by_coverage[0]["Binding_coverage"]
+    top_coverage_candidates = [c for c in sorted_by_coverage if c["Binding_coverage"] == max_coverage]
+
+    with_resolution = [c for c in top_coverage_candidates if c["Res_value"] is not None]
+    if with_resolution:
+        return min(with_resolution, key=lambda x: x["Res_value"])
+    return top_coverage_candidates[0]
+
+
+# --- Core Processing Functions ---
+
+def find_best_chain_local(structure, seq_uniprot: str, cov_chain_thr=0.7, cov_uniprot_thr=0.7, identity_thr=0.7):
+    """
+    Finds the best matching chain in a PDB structure against a UniProt sequence.
+
+    It performs local alignment for all chains and returns the ID of the chain
+    that best passes coverage and identity thresholds with the highest score.
+
+    Args:
+        structure (Bio.PDB.Structure.Structure): The PDB structure object.
+        seq_uniprot (str): The UniProt amino acid sequence.
+        cov_chain_thr (float): Minimum coverage threshold for the PDB chain.
+        cov_uniprot_thr (float): Minimum coverage threshold for the UniProt sequence.
+        identity_thr (float): Minimum identity threshold.
+
+    Returns:
+        tuple[str | None, pd.DataFrame]: A tuple containing:
+            - The ID of the best chain, or None if none pass the filters.
+            - A DataFrame with alignment details for all chains.
     """
     model = next(structure.get_models())
     records = []
 
     for chain in model:
-        polypep = Polypeptide.Polypeptide(chain)
-        seq_chain = str(polypep.get_sequence())
-        if not seq_chain:
+        try:
+            polypep = Polypeptide.Polypeptide(chain)
+            seq_chain = str(polypep.get_sequence())
+            if not seq_chain:
+                continue
+
+            res = local_align_smith_waterman(seq_chain, seq_uniprot)
+            rec = {
+                "chain_id": chain.id,
+                "chain_length": len(seq_chain),
+                "score": res["score"],
+                "coverageChain": res["coverageChain"],
+                "coverageUniProt": res["coverageUniProt"],
+                "identity": res["identity"]
+            }
+            records.append(rec)
+        except Exception:
             continue
-
-        res = local_align_smith_waterman(seq_chain, seq_uniprot)
-        rec = {
-            "chain_id": chain.id,
-            "chain_length": len(seq_chain),
-            "score": res["score"],
-            "coverageChain": res["coverageChain"],
-            "coverageUniProt": res["coverageUniProt"],
-            "identity": res["identity"]
-        }
-        records.append(rec)
-
-    import pandas as pd
-    df_chain = pd.DataFrame(records)
-    if df_chain.empty:
+            
+    if not records:
         return None, pd.DataFrame()
 
-    # Define pass_filter
+    df_chain = pd.DataFrame(records)
     df_chain["pass_filter"] = (
         (df_chain["coverageChain"] >= cov_chain_thr) &
         (df_chain["coverageUniProt"] >= cov_uniprot_thr) &
         (df_chain["identity"] >= identity_thr)
     )
 
-    # Among those passing, pick the chain with highest score
-    df_pass = df_chain[df_chain["pass_filter"]]
-    if df_pass.empty:
-        best_chain_id = None
-    else:
-        df_pass = df_pass.sort_values("score", ascending=False)
-        best_chain_id = df_pass.iloc[0]["chain_id"]
+    df_pass = df_chain[df_chain["pass_filter"]].sort_values("score", ascending=False)
 
+    best_chain_id = df_pass.iloc[0]["chain_id"] if not df_pass.empty else None
     return best_chain_id, df_chain
 
-def process_gpcr_pdb_chains(df_uniprot_acs, cov_chain_thr=0.7, cov_uniprot_thr=0.7, identity_thr=0.7):
-    """
-    For each row in df_uniprot_acs, we:
-      1) Fetch the UniProt sequence
-      2) For each PDB ID (in the 'PDB' column, separated by ';'), download the .cif file
-      3) Parse the .cif with BioPython's MMCIFParser
-      4) Find the best chain that meets coverage_thr & identity_thr
-      5) Collect results in a DataFrame
-    
-    Returns a DataFrame with columns:
-      [ UniProt_ID, PDB_ID, chain_id, chain_length, score, coverage, identity, pass_filter ]
-    """
-    results = []
 
-    for idx, row in df_uniprot_acs.iterrows():
+def process_gpcr_pdb_chains(gpcr_info_csv: str, output_dir: str, cif_cache_dir: str) -> str:
+    """
+    Identifies the most representative chain for each GPCR-PDB entry.
+
+    Args:
+        gpcr_info_csv (str): Path to the input CSV file containing 'Entry' (UniProt ID)
+                             and 'PDB' columns.
+        output_dir (str): Directory to save the output CSV file.
+        cif_cache_dir (str): Directory to download and cache mmCIF files.
+
+    Returns:
+        str: The path to the generated output file.
+    """
+    df_uniprot_acs = pd.read_csv(gpcr_info_csv)
+    results = []
+    parser = MMCIFParser(QUIET=True)
+
+    print("[INFO] Finding representative chains for each GPCR-PDB pair...")
+    for _, row in tqdm(df_uniprot_acs.iterrows(), total=len(df_uniprot_acs)):
         uniprot_id = str(row["Entry"]).strip()
         pdb_list_str = row.get("PDB", "")
         if pd.isna(pdb_list_str) or not pdb_list_str:
             continue
 
-        # 1) Fetch UniProt sequence
         uni_seq = fetch_uniprot_sequence(uniprot_id)
         if not uni_seq:
-            print(f"[WARNING] UniProt seq not found for {uniprot_id}. Skipping.")
+            print(f"[WARN] UniProt sequence not found for {uniprot_id}. Skipping.")
             continue
 
-        # PDB column can be something like "8GO9;8J8V;8J8Z;"
         pdb_ids = [p.strip() for p in pdb_list_str.split(';') if p.strip()]
-
         for pdb_id in pdb_ids:
-            pdb_id_lower = pdb_id.lower()
-
-            # 2) Download .cif
-            cif_file_path = download_mmcif(pdb_id_lower, CIF_DOWNLOAD_DIR)
+            cif_file_path = download_mmcif(pdb_id, cif_cache_dir)
             if not cif_file_path:
                 continue
 
-            # 3) Parse structure
             try:
-                parser = MMCIFParser(QUIET=True)
-                structure = parser.get_structure(pdb_id_lower, cif_file_path)
+                structure = parser.get_structure(pdb_id.lower(), cif_file_path)
+                _, df_chain = find_best_chain_local(structure, uni_seq)
+                if not df_chain.empty:
+                    df_chain["UniProt_ID"] = uniprot_id
+                    df_chain["PDB_ID"] = pdb_id
+                    results.append(df_chain)
             except Exception as e:
-                print(f"[ERROR] Failed to parse CIF {pdb_id}: {e}")
+                print(f"[ERROR] Failed to process {pdb_id} for {uniprot_id}: {e}")
                 continue
 
-            # 4) Find best chain
-            best_chain_id, df_chain = find_best_chain_local(
-                structure, uni_seq
-            )
-
-            # 5) Collect results
-            if not df_chain.empty:
-                df_chain["UniProt_ID"] = uniprot_id
-                df_chain["PDB_ID"] = pdb_id
-                results.append(df_chain)
-
     if not results:
-        return pd.DataFrame()
+        print("[WARN] No valid chains were processed.")
+        return ""
+    
     df_res = pd.concat(results, ignore_index=True)
-    # Reorder columns for clarity
     cols = ["UniProt_ID", "PDB_ID", "chain_id", "chain_length", "score", "coverageChain", "coverageUniProt", "identity", "pass_filter"]
     df_res = df_res[cols]
-    return df_res
+    
+    output_path = os.path.join(output_dir, "Rep_GPCR_chain.csv")
+    df_res.to_csv(output_path, index=False)
+    print(f"[SUCCESS] Representative chain data saved to {output_path}")
+    return output_path
+
+
+def select_apo_structures(gpcr_pdb_info_csv: str, binding_sites_csv: str, rep_chain_csv: str, output_dir: str, cif_cache_dir: str) -> str:
+    """
+    Selects the best representative "Apo" structure for each GPCR.
+
+    Args:
+        gpcr_pdb_info_csv (str): Path to CSV with UniProt ID, PDB ID, and 'Classification'.
+        binding_sites_csv (str): Path to CSV with binding site residues for each UniProt ID.
+        rep_chain_csv (str): Path to CSV mapping each PDB to its representative chain.
+        output_dir (str): Directory to save the output CSV file.
+        cif_cache_dir (str): Directory to cache downloaded mmCIF files.
+
+    Returns:
+        str: The path to the generated output file.
+    """
+    gpcr_pdb_df = pd.read_csv(gpcr_pdb_info_csv)
+    gpcr_bs_df = pd.read_csv(binding_sites_csv)
+    rep_chain_df = pd.read_csv(rep_chain_csv)
+    parser = MMCIFParser(QUIET=True)
+
+    apo_df = gpcr_pdb_df[gpcr_pdb_df["Classification"].str.lower() == "apo"].copy()
+    results = []
+
+    print("[INFO] Selecting best Apo structure for each GPCR...")
+    for uniprot_id, group in tqdm(apo_df.groupby("Entry"), total=apo_df['Entry'].nunique()):
+        binding_row = gpcr_bs_df[gpcr_bs_df["UniProt_ID"] == uniprot_id]
+        if binding_row.empty:
+            continue
+        binding_residues_list = ast.literal_eval(binding_row.iloc[0]["Binding_Residues"])
+
+        candidates = []
+        for _, row in group.iterrows():
+            pdb_id = row["PDB_ID"].strip()
+            chain_row = rep_chain_df[(rep_chain_df["UniProt_ID"] == uniprot_id) & (rep_chain_df["PDB_ID"] == pdb_id)]
+            if chain_row.empty:
+                continue
+            optimal_chain_id = chain_row.iloc[0]["chain_id"]
+            
+            cif_path = download_mmcif(pdb_id, cif_cache_dir)
+            if not cif_path:
+                continue
+
+            try:
+                structure = parser.get_structure(pdb_id.lower(), cif_path)
+                model = next(structure.get_models())
+                if optimal_chain_id not in model:
+                    continue
+                
+                chain = model[optimal_chain_id]
+                pdb_res_list = [res for res in chain if is_aa(res, standard=True)]
+                pdb_seq = Polypeptide.Polypeptide(chain).get_sequence()
+                
+                uni_seq = fetch_uniprot_sequence(uniprot_id)
+                if not uni_seq: continue
+
+                aln = local_align_smith_waterman(str(pdb_seq), uni_seq)
+                res_map = map_pdb_res_to_uniprot(pdb_res_list, aln["aligned_pdb_seq"], aln["aligned_uni_seq"])
+                
+                mapped_uniprot_set = set(res_map.values())
+                overlap = set(binding_residues_list).intersection(mapped_uniprot_set)
+                coverage = len(overlap) / len(binding_residues_list) if binding_residues_list else 0
+                
+                resolution = extract_resolution_from_cif(cif_path)
+                res_value = float(resolution) if resolution != "NA" else None
+
+                candidates.append({
+                    "UniProt_ID": uniprot_id, "PDB_ID": pdb_id, "Binding_include": int(coverage == 1.0),
+                    "Binding_coverage": coverage, "Resolution": resolution, "Res_value": res_value
+                })
+            except Exception as e:
+                print(f"[ERROR] Failed to process Apo structure {pdb_id} for {uniprot_id}: {e}")
+                continue
+
+        if candidates:
+            best_candidate = _find_best_candidate(candidates)
+            results.append({
+                "UniProt_ID": best_candidate["UniProt_ID"],
+                "PDB_ID": best_candidate["PDB_ID"],
+                "Resolution": best_candidate["Resolution"]
+            })
+
+    df = pd.DataFrame(results, columns=["UniProt_ID", "PDB_ID", "Resolution"])
+    output_path = os.path.join(output_dir, "Representative_Apo_Structures.csv")
+    df.to_csv(output_path, index=False)
+    print(f"[SUCCESS] Representative Apo structures saved to {output_path}")
+    return output_path
+
+
+# --- Main Execution Block ---
+
+def main():
+    """Main function to parse command-line arguments and run the pipeline."""
+    parser = argparse.ArgumentParser(
+        description="GPCR Structure Analysis Pipeline: Identifies representative chains and Apo structures.",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+
+    parser.add_argument(
+        "--gpcr_info_csv",
+        type=str,
+        default="data/Human_GPCR_PDB_Info.csv",
+        help="Path to the master CSV file with UniProt IDs and PDB IDs.\n(Default: data/Human_GPCR_PDB_Info.csv)"
+    )
+    parser.add_argument(
+        "--binding_site_csv",
+        type=str,
+        default="data/GPCR_PDB_classification.csv",
+        help="Path to the CSV file containing binding site residue information.\n(Default: data/GPCR_PDB_classification.csv)"
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="outputs/structural_analysis",
+        help="Directory to save the output files.\n(Default: outputs/structural_analysis)"
+    )
+    parser.add_argument(
+        "--cif_cache_dir",
+        type=str,
+        default="cif_cache",
+        help="Directory to cache downloaded mmCIF files.\n(Default: cif_cache)"
+    )
+    parser.add_argument(
+        "--skip_chain_processing",
+        action="store_true",
+        help="Skip the 'process_gpcr_pdb_chains' step if its output already exists."
+    )
+
+    args = parser.parse_args()
+
+    # Create necessary directories
+    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.cif_cache_dir, exist_ok=True)
+
+    # --- Pipeline Execution ---
+    rep_chain_path = os.path.join(args.output_dir, "Rep_GPCR_chain.csv")
+
+    if args.skip_chain_processing and os.path.exists(rep_chain_path):
+        print(f"[INFO] Skipping chain processing. Using existing file: {rep_chain_path}")
+    else:
+        rep_chain_path = process_gpcr_pdb_chains(
+            gpcr_info_csv=args.gpcr_info_csv,
+            output_dir=args.output_dir,
+            cif_cache_dir=args.cif_cache_dir
+        )
+
+    if not rep_chain_path or not os.path.exists(rep_chain_path):
+         print("[ERROR] Representative chain file was not found or generated. Cannot proceed. Exiting.")
+         return
+
+    select_apo_structures(
+        gpcr_pdb_info_csv=args.gpcr_info_csv,
+        binding_sites_csv=args.binding_site_csv,
+        rep_chain_csv=rep_chain_path,
+        output_dir=args.output_dir,
+        cif_cache_dir=args.cif_cache_dir
+    )
+
+    print("\n[INFO] ✅ Pipeline finished successfully.")
+
+
+if __name__ == "__main__":
+    main()
