@@ -12,9 +12,9 @@ This repository contains code and data for the study *"Interpretable prediction 
 - **Experimental relevance**: DRs align with biologically validated residues in HCAR2, MLNR, and HTR2B.
 
 ## Repository Structure
-- **`data/`**: Contains GPCR-related data.
-  - `Human_GPCR_PDB_Info.csv`: CSV file with UniProt and PDB information.
+- **`data/`**: Contains key data files required for model training and prediction.
   - `splits/`: Train and test sets from pair and scaffold splits (InChIKey | UniProt accession | Label).
+- **`model/`**: Contains the pre-trained Keras model for immediate use.
 - **`scripts/`**: Core analysis scripts.
   - `data_preparation/`: Methods to build GPCRactDB.
     - `parse_pubchem_bioassay.py`: Collects and standardizes PubChem BioAssay data.
@@ -28,7 +28,8 @@ This repository contains code and data for the study *"Interpretable prediction 
       - `predict_drs_with_egnn.py`: Predicts DRs and activity with EGNN.
     - `extract_dr.py`: Extracts DRs by type.
     - `parse_gpcr_structures.py`: Analyzes GPCR structures (e.g., PDB chain selection, ligand extraction).
-    - `predict_gpcr_activity.py`: Builds and predicts with DR-based models.
+    - `train_model.py`: Trains the activity prediction model from scratch using pre-computed features.
+    - `predict_gpcr_activity.py`: Predicts GPCR activity for new data using the pre-trained model.
   - `utils/`: Utility scripts.
     - `utils_structure.py`: Additional structure parsing utilities.
     - `split_gpcr_dataset.py`: Splits dataset into train/test sets.
