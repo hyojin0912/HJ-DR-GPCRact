@@ -26,7 +26,7 @@ np.random.seed(42)
 
 # --- Global Settings ---
 # NOTE: Update these paths to match your repository structure
-MODEL_PATH = "../Output/Final/AF2/model"  # Path to the saved Keras model directory or .h5 file
+MODEL_PATH = "../model"  # Path to the saved Keras model directory or .h5 file
 
 # DR thresholds (ensure these match the training configuration)
 DISP_THRESHOLD_AGO = 2.0
